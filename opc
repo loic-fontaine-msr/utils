@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# Define cache directory and expiration time (in seconds)
+CACHE_DIR="$HOME/.op_cache"
+CACHE_TTL=3000  # 5 minutes
+
+# Create cache directory if it doesn't exist
+mkdir -p "$CACHE_DIR"
+
+# Function to generate a cache file key based on the command and arguments
+cache_key() {
+    echo "$@" | md5
+}
+
+# Function to get cached result if valid
+get_cached_result() {
+    local key=$1
+    local cache_file="$CACHE_DIR/$key"
+    
+    if [[ -f "$cache_file" ]]; then
+        local current_time=$(date +%s)
+        local file_time=$(stat -f "%m" "$cache_file")  # macOS uses stat -f
+        local age=$((current_time - file_time))
+        
+        if [[ $age -lt $CACHE_TTL ]]; then
+            # Cache is valid, return the cached result
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+    
+    # Cache is invalid or doesn't exist
+    return 1
+}
+
+# Function to cache the result
+cache_result() {
+    local key=$1
+    local result=$2
+    local cache_file="$CACHE_DIR/$key"
+    
+    echo "$result" > "$cache_file"
+}
+
+# Get the command and arguments passed to the script
+KEY=$(cache_key "$@")
+
+# Check if the command contains the --otp flag
+if [[ "$*" == *"--otp"* ]]; then
+    # If --otp is present, skip caching and run the command directly
+    op "$@"
+else
+    # Try to get a cached result
+    if ! get_cached_result "$KEY"; then
+        # If there's no valid cache, run the 1Password CLI command
+        RESULT=$(op "$@")
+        STATUS=$?  # Capture the exit status of the command
+
+        # Only cache the result if the command was successful (exit code 0)
+        if [[ $STATUS -eq 0 ]]; then
+            cache_result "$KEY" "$RESULT"
+        fi
+
+        # Output the result
+        echo "$RESULT"
+    fi
+fi
